@@ -1,4 +1,5 @@
 import cv2
+import os
 import numpy as np
 import pandas as pd
 import scipy.stats as stat
@@ -8,21 +9,23 @@ import matplotlib.pyplot as plt
 
 def edge_dec(orig, mod):
     '''See modified picture and original side-by-side'''
-    plt.subplot(121),plt.imshow(orig, cmap = "gray")
-    plt.title('Original Image'), plt.xticks([]), plt.yticks([])
-
+    plt.clf()
     plt.subplot(122),plt.imshow(mod, cmap = "gray")
     plt.title('Modded Image'), plt.xticks([]), plt.yticks([])
 
+    plt.subplot(121),plt.imshow(orig, cmap = "gray")
+    plt.title('Original Image'), plt.xticks([]), plt.yticks([])
+
 def show_stats(mod, stats1, stats2):
     '''Display the axes extracted from the picture on the picture'''
+    plt.clf()
     plt.subplot(121), plt.imshow(mod, cmap = "gray")
     plt.subplot(121), plt.plot(stats1)
 
     plt.subplot(122), plt.imshow(np.rot90(mod), cmap = "gray")
     plt.subplot(122), plt.plot(stats2)
 
-# Hough method, detects lines probabilistically
+# Hough method, detects lines probabilistically NOTE: NOT USED
 def apply_hough(mat, thresh = 110, maxgap = 3, minline = 50):
     '''Detect and create mask of lines from the picture.
     Hough method, probabilistic line detection but not accurate enough
@@ -46,22 +49,22 @@ def check_for_rect(mat):
     with z-scores over 3.5 in quarters of images'''
     dims = mat.shape
 
-    ax_vert = stat.zscore(np.sum(mat, axis=1))
-    ax_vert_left = ax_vert[:int(dims[0]/3)]
-    ax_vert_right = ax_vert[int(dims[0]*2/3):]
+    ax_vert = stat.zscore(np.std(mat, axis=1))
+    ax_vert_left = ax_vert[:int(dims[0]/4)]
+    ax_vert_right = ax_vert[int(dims[0]*3/4):]
 
-    ax_hori = stat.zscore(np.sum(mat, axis=0))
-    ax_hori_upper = ax_hori[:int(dims[1]/3)]
-    ax_hori_lower = ax_hori[int(dims[1]*2/3):]
+    ax_hori = stat.zscore(np.std(mat, axis=0))
+    ax_hori_upper = ax_hori[:int(dims[1]/4)]
+    ax_hori_lower = ax_hori[int(dims[1]*3/4):]
 
     # check for 3.5 (99.5 limit) in the corners and that
-    # the area is smaller than quarter of axis length
-    return (np.sum( ax_vert_left[ax_vert_left > 3.5] ) / dims[0] > 0 and
-       np.sum( ax_vert_right[ax_vert_right > 3.5] ) / dims[0] > 0 and
-       np.sum( ax_hori_upper[ax_hori_upper > 3.5] ) / dims[1] > 0 and
-       np.sum( ax_hori_lower[ax_hori_lower > 3.5] ) / dims[1] > 0 and
-       np.sum( ax_vert[ax_vert > 3.5] ) / dims[0] < 0.25 and
-       np.sum( ax_hori[ax_hori > 3.5] ) / dims[1] < 0.25)
+    # the area is smaller than third of axis length
+    return (np.sum( ax_vert_left[ax_vert_left > 1.98] ) / dims[0] > 0 and
+       np.sum( ax_vert_right[ax_vert_right > 1.98] ) / dims[0] > 0 and
+       np.sum( ax_hori_upper[ax_hori_upper > 1.98] ) / dims[1] > 0 and
+       np.sum( ax_hori_lower[ax_hori_lower > 1.98] ) / dims[1] > 0 and
+       np.sum( ax_vert[ax_vert > 1.98] ) / dims[0] < 0.33 and
+       np.sum( ax_hori[ax_hori > 1.98] ) / dims[1] < 0.33)
 
 def detect_rect(mat, minlineprop):
     '''Detect lines from picture (mat) that are horizontal and rectangular
@@ -79,70 +82,69 @@ def detect_rect(mat, minlineprop):
                                              (int(dims[1]*minlineprop), 1))
     horiz = cv2.erode(mat, horiz_struct)
     horiz = cv2.dilate(horiz, horiz_struct)
-    return vertic+horiz
+    return vertic + horiz
 
 def detect_rot_rect(mat, minlineprop, rotrange):
     '''Detect lines that are horizontal and rectangular and 2/3 of picture length.
         Finds also slightly curved lines by image rotation'''
     checkrange = np.insert(
-        np.arange(-int(rotrange/2), int(rotrange/2)), 0, 0)
+        np.arange(-int(rotrange / 2), int(rotrange / 2)), 0, 0)
     test = mat.copy()
 
     for degree in checkrange:
         res = detect_rect(test, minlineprop)
         if check_for_rect(res):
             print("Rotated", degree, "degrees.", end='\n')
-            return ndimage.rotate(res, -degree, reshape = False)
+            return res, degree
         else:
-            print("Rotateing", degree, "degrees.", end='\r')
+            print("Rotate:", degree, "degrees.", end='\r')
             test = ndimage.rotate(mat, degree, reshape = False)
-    return None
+    return 0, 0
 
-#### MAIN
-# inputs
-img_path = "img/img1.png"
+def get_rect_bounds(mat):
+    dims = mat.shape
+    ax_vert = stat.zscore(np.std(mat, axis=1))
+    ax_vert_left = ax_vert[:int(dims[0] / 4)][::-1]
+    ax_vert_right = ax_vert[int(dims[0] * 3/4):]
 
-img = cv2.imread(img_path, 0)
-dims = img.shape
-# denoise for more edgy picture
-img = cv2.fastNlMeansDenoising(img, None, 10, 5, 21)
-# Canny edge detection
-edg = cv2.Canny(img, 50, 240, apertureSize=3)
-# smooth the edges slightly for smoother lines
-edg = ndimage.gaussian_filter(edg, 2)
-# hugh = apply_hough(edg, thresh = 250, maxgap = 2, minline = min(dims)*0.5)
-# edge_dec(edg, hugh)
-#edg = ndimage.rotate(edg, 1, reshape = False)
-edge_dec(img, edg)
+    ax_hori = stat.zscore(np.std(mat, axis=0))
+    ax_hori_upper = ax_hori[:int(dims[1] / 4)][::-1]
+    ax_hori_lower = ax_hori[int(dims[1] * 3/4):]
 
-plt.close()
-
-detected = detect_rect(edg, .58)
-edge_dec(edg, detected)
-
-
-rectd = detect_rot_rect(edg, .58, 30)
-if rectd is not None:
-    edge_dec(edg, rectd)
-else:
-    print("Could not find the frame!")
-
-## from git's main function
-# contours = get_contours(img)
-# bounds = get_boundaries(img, contours)
-# cropped = crop(img, bounds)
-
-# use the countour finding on the other solution after this
-# frame reduction
-
-####
-#### NOTE: from here on snatched from the git
-####
+    return [int( dims[1] / 4 - np.where(ax_hori_upper > 1.98)[0][0] ),
+                 int( dims[0] / 4 - np.where(ax_vert_left > 1.98)[0][0] ),
+                 int( np.where(ax_hori_lower > 1.98)[0][0] + dims[1] * 3/4 ),
+                 int( np.where(ax_vert_right > 1.98)[0][0] + dims[0] * 3/4 )]
 
 def crop(img, boundaries):
     """Crop the image to the given boundaries."""
     minx, miny, maxx, maxy = boundaries
     return img[miny:maxy, minx:maxx]
+
+def process(img, rotate):
+    dims = orig_img.shape
+    # denoise for more edgy picture
+    edg = cv2.fastNlMeansDenoising(img, None, 8, 7, 12)
+    # Canny edge detection
+    edg = cv2.Canny(edg, 20, 250, apertureSize=3)
+    # blur the edges slightly for smoother lines
+    edg = ndimage.gaussian_filter(edg, 2.1)
+    #edge_dec(img, detect_rect( edg , .58))
+    edge_dec(img, edg)
+
+    rectd, degr = detect_rot_rect(edg, .58, rotate)
+    if rectd is not 0:
+        if degr > 0: img = ndimage.rotate(img, degr, reshape = False)
+        frames = get_rect_bounds(rectd)
+        # crop the frame
+        return crop(img, frames)
+    else:
+        print("Could not find the frame!")
+        return np.zeros((2, 2))
+
+####
+#### NOTE: from here on snatched from the git
+####
 
 def get_contours(img):
     """Threshold the image and get contours."""
@@ -199,3 +201,25 @@ def contourOK(img, cc):
     if area > (get_size(img) * 0.3): return False
     if area < 200: return False
     return True
+
+#### MAIN
+# inputs
+img_path = "img/img1.png"
+
+orig_img = cv2.imread(img_path, 1)
+proc_img = process(orig_img, 20)
+
+if get_size(proc_img) < get_size(orig_img) / 4:
+    print("Resulting image too small, skipping output")
+    #plt.imshow(orig_img)
+else:
+    edge_dec(orig_img, proc_img)
+    cv2.imwrite(os.path.dirname(img_path) + "/" + os.path.basename(img_path) + "_cropped.png",
+                proc_img)
+## from git's main function
+# contours = get_contours(img)
+# bounds = get_boundaries(img, contours)
+# cropped = crop(img, bounds)
+
+# use the countour finding on the other solution after this
+# frame reduction
