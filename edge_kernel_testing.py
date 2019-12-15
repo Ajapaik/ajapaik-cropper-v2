@@ -55,8 +55,8 @@ def check_for_rect(mat, edge_coverage = 3, thresh = 1.98):
        np.sum( ax_vert_right[ax_vert_right > thresh] ) / dims[0] > 0 and
        np.sum( ax_hori_upper[ax_hori_upper > thresh] ) / dims[1] > 0 and
        np.sum( ax_hori_lower[ax_hori_lower > thresh] ) / dims[1] > 0 and
-       np.sum( ax_vert[ax_vert > thresh] ) / dims[0] < 0.33 and
-       np.sum( ax_hori[ax_hori > thresh] ) / dims[1] < 0.33)
+       np.sum( ax_vert[ax_vert > thresh]) / dims[0] < 0.33 and
+       np.sum( ax_hori[ax_hori > thresh]) / dims[1] < 0.33)
 
 def detect_rect(mat, minlineprop):
     '''Detect lines from picture (mat) that are horizontal and rectangular
@@ -89,17 +89,6 @@ def get_rect_bounds(mat, edge_coverage = 3, thresh = 1.98):
     ax_hori_upper = ax_hori[:int(dims[1] / edge_coverage)][::-1]
     ax_hori_lower = ax_hori[int(dims[1] * ( edge_coverage-1 )/edge_coverage):]
 
-    plt.subplot(211)
-    plt.plot(np.full_like(ax_vert, 1.98), 'r--')
-    plt.plot(ax_vert)
-    plt.xticks([])
-    plt.title("Vertical and horizontal z-scores of axis sums")
-
-    plt.subplot(212)
-    plt.plot(np.full_like(ax_hori, 1.98), 'r--')
-    plt.plot(ax_hori)
-    plt.xticks([])
-
     # find first occurrence of qualifing line for frame
     return [int( dims[1] / edge_coverage - np.where(ax_hori_upper > thresh)[0][0] ),
                  int( dims[0] / edge_coverage - np.where(ax_vert_left > thresh)[0][0] ),
@@ -115,7 +104,7 @@ def detect_rot_rect(mat, minlineprop, rotrange, edge_coverage = 3):
 
     for degree in checkrange:
         res = detect_rect(test, minlineprop)
-        if check_for_rect(res, thresh=2.4):
+        if check_for_rect(res, thresh=1.98):
             print("Rotated", degree, "degrees.", end = '\n')
             return res, degree
         else:
@@ -125,22 +114,19 @@ def detect_rot_rect(mat, minlineprop, rotrange, edge_coverage = 3):
 
 def preprocess(img):
     # denoise for more edgy picture
-    edg = cv2.fastNlMeansDenoising(img, None, 8, 7, 12)
+    edg = cv2.fastNlMeansDenoisingColored(img, None, 8, 7, 12)
     # Canny edge detection
-    edg = cv2.Canny(edg, 30, 250, apertureSize = 3)
+    edg = cv2.Canny(edg, 20, 250, apertureSize = 3)
+    #edg = cv2.Laplacian(edg, cv2.CV_8U)
     # blur the edges slightly for smoother lines
     edg = ndimage.gaussian_filter(edg, 2.1)
     # see the detected lines:
-    #plt.imshow(edg), plt.xticks([]), plt.yticks([])
     return edg
 
 def process(img, rotate):
     edg = preprocess(img)
     # main line-based frame detection
     rectd, degr = detect_rot_rect(edg, .58, rotate, 4)
-    # plt.imshow(ndimage.rotate(rectd, -degr, reshape = False)),
-    # plt.xticks([]), plt.yticks([])
-
 
     if rectd is not 0:
         # rotate the original image to correct angle
@@ -148,7 +134,7 @@ def process(img, rotate):
             img = ndimage.rotate(img, degr, reshape = False)
 
         # crop the frame
-        frames = get_rect_bounds(rectd, thresh=2.4)
+        frames = get_rect_bounds(rectd, thresh=1.98)
         proc_img = crop(img, frames)
 
         # else recurse the frame picture until no
@@ -168,11 +154,12 @@ def save(mat, filename, extra):
     cv2.imwrite(outname, mat)
     return outname
 
-input_file = 'img/img24.jpg'
+input_file = 'img/Lembit0008.JPG'
 rotation = 10
 img = cv2.imread(input_file, 1)
 proc_img = process(img, rotation)
 
+edge_dec(img, proc_img)
 
 # outname = save(proc_img, input_file, "_crop.png")
 # print("Found cut and printed:", outname)

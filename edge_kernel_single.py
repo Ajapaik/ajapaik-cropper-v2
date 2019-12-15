@@ -50,7 +50,7 @@ def check_for_rect(mat, edge_coverage = 3, thresh = 1.98):
     ax_hori_upper = ax_hori[:int(dims[1]/edge_coverage)]
     ax_hori_lower = ax_hori[int(dims[1] * (edge_coverage - 1)/edge_coverage):]
 
-    # check for 3.5 (99.5 limit) in the corners and that
+    # check for in the corners and that
     # the area is smaller than third of axis length
     return (np.sum( ax_vert_left[ax_vert_left > thresh] ) / dims[0] > 0 and
        np.sum( ax_vert_right[ax_vert_right > thresh] ) / dims[0] > 0 and
@@ -96,7 +96,7 @@ def get_rect_bounds(mat, edge_coverage = 3, thresh = 1.98):
                  int( np.where(ax_hori_lower > thresh)[0][0] + dims[1] * ( edge_coverage-1 )/edge_coverage ),
                  int( np.where(ax_vert_right > thresh)[0][0] + dims[0] * ( edge_coverage-1 )/edge_coverage )]
 
-def detect_rot_rect(mat, minlineprop, rotrange, edge_coverage = 3):
+def detect_rot_rect(mat, minlineprop, rotrange, edge_coverage = 3, thresh=1.98):
     '''Detect lines that are horizontal and rectangular and at least
     2/3 of picture length. Finds also slightly rotated lines by image rotation'''
     checkrange = np.insert(
@@ -105,7 +105,7 @@ def detect_rot_rect(mat, minlineprop, rotrange, edge_coverage = 3):
 
     for degree in checkrange:
         res = detect_rect(test, minlineprop)
-        if check_for_rect(res, thresh=2.4):
+        if check_for_rect(res, thresh):
             print("Rotated", degree, "degrees.", end = '\n')
             return res, degree
         else:
@@ -115,19 +115,20 @@ def detect_rot_rect(mat, minlineprop, rotrange, edge_coverage = 3):
 
 def preprocess(img):
     # denoise for more edgy picture
-    edg = cv2.fastNlMeansDenoising(img, None, 8, 7, 12)
+    edg = cv2.fastNlMeansDenoisingColored(img, None, 8, 7, 12)
     # Canny edge detection
-    edg = cv2.Canny(edg, 50, 250, apertureSize = 3)
+    edg = cv2.Canny(edg, 30, 250, apertureSize = 3)
     # blur the edges slightly for smoother lines
-    edg = ndimage.gaussian_filter(edg, 2.1)
+    edg = ndimage.gaussian_filter(edg, 2.2)
     # see the detected lines:
     #edge_dec(img, detect_rect( edg , .58))
     return edg
 
-def process(img, rotate):
+def process(img, rotate, minlen=.58, thresh=1.98):
     edg = preprocess(img)
     # main line-based frame detection
-    rectd, degr = detect_rot_rect(edg, .58, rotate, 4)
+    rectd, degr = detect_rot_rect(edg, minlen, rotate,
+                                  edge_coverage=4, thresh=thresh)
 
     if rectd is not 0:
         # rotate the original image to correct angle
@@ -135,13 +136,13 @@ def process(img, rotate):
             img = ndimage.rotate(img, degr, reshape = False)
 
         # crop the frame
-        frames = get_rect_bounds(rectd, thresh=2.4)
+        frames = get_rect_bounds(rectd, thresh=thresh)
         proc_img = crop(img, frames)
 
         # else recurse the frame picture until no
         # good frames are to be found.
 
-        if get_size(proc_img) > get_size(img) / 1.6:
+        if get_size(proc_img) > get_size(img) / 1.4:
             return process(proc_img, 4)
         else:
             return proc_img
@@ -149,17 +150,25 @@ def process(img, rotate):
         return img
 
 # MAIN
-def mainer(input_file, rotation=20):
-    img = cv2.imread(input_file, 1)
-    proc_img = process(img, rotation)
+def mainer(input_file, rotation=20, minlen = .59, thresh = 1.98, sizediff = 4):
+    if (minlen > 0 and sizediff > 1 and rotation > 0):
+        print("Checking", input_file)
+        img = cv2.imread(input_file, 1)
+        proc_img = process(img, rotation, minlen = minlen, thresh = thresh)
 
-    if get_size(proc_img) < get_size(img) / 4 or get_size(proc_img) == get_size(img):
-        print("Did not find a good cut...")
+        if get_size(proc_img) < get_size(img) / sizediff or get_size(proc_img) == get_size(img):
+            print("Did not find a good cut... trying lower minimum line lengths")
+            mainer(input_file, rotation - 8,
+                   minlen = minlen - .20, thresh = thresh + 0.3,
+                   sizediff = sizediff - 1)
+            return None
+
+        outname = save(proc_img, input_file, "_crop.png")
+        print("Found cut and printed:", outname)
         return None
-
-    outname = save(proc_img, input_file, "_crop.png")
-    print("Found cut and printed:", outname)
-    return None
+    else:
+        print("Did not find a cut, exiting.")
+        return None
 
 def save(mat, filename, extra):
     outname = os.path.dirname(
